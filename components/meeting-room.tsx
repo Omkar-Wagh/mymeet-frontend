@@ -7,7 +7,10 @@ import {
 } from "@stomp/stompjs"
 
 import {
+  Check,
+  Copy,
   Link2,
+  Loader2,
   MessageCircle,
   Mic,
   MicOff,
@@ -91,6 +94,16 @@ type PeerState = {
   ignoreOffer: boolean
 }
 
+type JoinPhase =
+  | "idle"
+  | "requesting_media"
+  | "connecting_ws"
+  | "subscribing"
+  | "joining_room"
+  | "waiting_room_state"
+  | "ready"
+  | "error"
+
 /* =========================================================
    CONSTANTS & HELPERS
    ========================================================= */
@@ -125,6 +138,11 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
 
   const [name, setName] = useState("")
   const [joined, setJoined] = useState(false)
+  const [joinPhase, setJoinPhase] = useState<JoinPhase>("idle")
+  const [slowServerNotice, setSlowServerNotice] = useState(false)
+  const [copiedUrl, setCopiedUrl] = useState(false)
+  const [isLeaving, setIsLeaving] = useState(false)
+
   const [participants, setParticipants] = useState<Participant[]>([])
   const [pinnedParticipantId, setPinnedParticipantId] = useState<string | null>(null)
 
@@ -160,6 +178,7 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
   const leavingRef = useRef(false)
   const joiningRef = useRef(false)
   const mountedRef = useRef(true)
+  const slowNoticeTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   /* =======================================================
      INITIALIZE PARTICIPANT
@@ -178,11 +197,12 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
 
     return () => {
       mountedRef.current = false
+      if (slowNoticeTimerRef.current) clearTimeout(slowNoticeTimerRef.current)
     }
   }, [])
 
   /* =======================================================
-     CALLBACK REF FOR LOCAL VIDEO (FIXES BLACKOUT ON RE-RENDER)
+     CALLBACK REF FOR LOCAL VIDEO
      ======================================================= */
 
   const setLocalVideoRef = useCallback((element: HTMLVideoElement | null) => {
@@ -483,6 +503,11 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
             })
           )
 
+          // Mark meeting as fully ready once initial room state is obtained
+          setJoinPhase("ready")
+          if (slowNoticeTimerRef.current) clearTimeout(slowNoticeTimerRef.current)
+          setSlowServerNotice(false)
+
           for (const participant of normalized) {
             if (participant.id === participantIdRef.current) continue
             if (participantIdRef.current < participant.id) {
@@ -508,7 +533,9 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
         if (type === "JOIN_REJECTED") {
           setJoinError(data.message || "You are already participating in this meeting.")
           setJoined(false)
+          setJoinPhase("error")
           joiningRef.current = false
+          if (slowNoticeTimerRef.current) clearTimeout(slowNoticeTimerRef.current)
           return
         }
 
@@ -659,68 +686,96 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
     joiningRef.current = true
     leavingRef.current = false
     setJoinError(null)
+    setSlowServerNotice(false)
+    setJoinPhase("requesting_media")
 
-    if (!participantIdRef.current) {
-      participantIdRef.current = crypto.randomUUID()
+    // Slow connection timeout feedback
+    slowNoticeTimerRef.current = setTimeout(() => {
+      setSlowServerNotice(true)
+    }, 6000)
+
+    try {
+      if (!participantIdRef.current) {
+        participantIdRef.current = crypto.randomUUID()
+      }
+
+      const displayName = name.trim() || "Guest"
+      nameRef.current = displayName
+      sessionStorage.setItem("mymeet-name", displayName)
+      setName(displayName)
+      setStatus("connecting")
+
+      const stream = await getLocalMedia()
+      if (!stream) {
+        setMediaWarning("You joined without camera/microphone. You can still view/listen.")
+      }
+
+      setParticipants([
+        {
+          id: participantIdRef.current,
+          name: displayName,
+          stream: stream || undefined,
+        },
+      ])
+
+      setJoined(true)
+      setJoinPhase("connecting_ws")
+
+      const client = new Client({
+        brokerURL: getBackendWsUrl(),
+        reconnectDelay: 5000,
+        onConnect: () => {
+          if (leavingRef.current) return
+          setStatus("connected")
+
+          setJoinPhase("subscribing")
+          const subscription = client.subscribe(`/topic/meet/${roomId}`, signal)
+          subscriptionsRef.current = [subscription]
+
+          setJoinPhase("joining_room")
+          client.publish({
+            destination: "/app/meet/join",
+            body: JSON.stringify({
+              roomId,
+              participantId: participantIdRef.current,
+              name: nameRef.current,
+            }),
+          })
+
+          setJoinPhase("waiting_room_state")
+        },
+        onStompError: () => {
+          if (mountedRef.current) {
+            setStatus("offline")
+            setJoinError("Unable to connect to the meeting server.")
+            setJoinPhase("error")
+            joiningRef.current = false
+            if (slowNoticeTimerRef.current) clearTimeout(slowNoticeTimerRef.current)
+          }
+        },
+        onWebSocketError: () => {
+          if (mountedRef.current) {
+            setStatus("offline")
+            setJoinError("WebSocket connection failed.")
+            setJoinPhase("error")
+            joiningRef.current = false
+            if (slowNoticeTimerRef.current) clearTimeout(slowNoticeTimerRef.current)
+          }
+        },
+        onWebSocketClose: () => {
+          if (mountedRef.current && !leavingRef.current) setStatus("offline")
+        },
+      })
+
+      clientRef.current = client
+      client.activate()
+    } catch (err) {
+      console.error("[MyMeet] Join process failed:", err)
+      setJoinError("An unexpected error occurred while joining.")
+      setJoinPhase("error")
+      joiningRef.current = false
+      if (slowNoticeTimerRef.current) clearTimeout(slowNoticeTimerRef.current)
     }
-
-    const displayName = name.trim() || "Guest"
-    nameRef.current = displayName
-    sessionStorage.setItem("mymeet-name", displayName)
-    setName(displayName)
-    setStatus("connecting")
-
-    const stream = await getLocalMedia()
-    if (!stream) {
-      setMediaWarning("You joined without camera/microphone. You can still view/listen.")
-    }
-
-    setParticipants([
-      {
-        id: participantIdRef.current,
-        name: displayName,
-        stream: stream || undefined,
-      },
-    ])
-
-    setJoined(true)
-
-    const client = new Client({
-      brokerURL: getBackendWsUrl(),
-      reconnectDelay: 5000,
-      onConnect: () => {
-        if (leavingRef.current) return
-        setStatus("connected")
-
-        const subscription = client.subscribe(`/topic/meet/${roomId}`, signal)
-        subscriptionsRef.current = [subscription]
-
-        client.publish({
-          destination: "/app/meet/join",
-          body: JSON.stringify({
-            roomId,
-            participantId: participantIdRef.current,
-            name: nameRef.current,
-          }),
-        })
-      },
-      onStompError: () => {
-        if (mountedRef.current) {
-          setStatus("offline")
-          setJoinError("Unable to connect to the meeting server.")
-          joiningRef.current = false
-        }
-      },
-      onWebSocketError: () => {
-        if (mountedRef.current) setStatus("offline")
-      },
-      onWebSocketClose: () => {
-        if (mountedRef.current && !leavingRef.current) setStatus("offline")
-      },
-    })
-
-    clientRef.current = client
-    client.activate()
   }, [getLocalMedia, joined, name, roomId, signal])
 
   /* =======================================================
@@ -730,6 +785,9 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
   const cleanup = useCallback(async () => {
     if (leavingRef.current) return
     leavingRef.current = true
+    setIsLeaving(true)
+
+    if (slowNoticeTimerRef.current) clearTimeout(slowNoticeTimerRef.current)
 
     const client = clientRef.current
     if (client && client.connected) {
@@ -779,12 +837,15 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
 
     setParticipants([])
     setJoined(false)
+    setJoinPhase("idle")
     setStatus("offline")
     setMessages([])
     setDraft("")
     setMediaWarning(null)
     setJoinError(null)
     setPinnedParticipantId(null)
+    setSlowServerNotice(false)
+    setIsLeaving(false)
 
     joiningRef.current = false
     leavingRef.current = false
@@ -816,6 +877,14 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
   /* =======================================================
      CONTROLS & CHAT ACTIONS
      ======================================================= */
+
+  const copyMeetUrl = useCallback(() => {
+    if (typeof window !== "undefined") {
+      void navigator.clipboard.writeText(window.location.href)
+      setCopiedUrl(true)
+      setTimeout(() => setCopiedUrl(false), 2000)
+    }
+  }, [])
 
   const sendMessage = useCallback(
     (event?: React.FormEvent) => {
@@ -904,6 +973,8 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
      JOIN SCREEN
      ======================================================= */
 
+  const isJoiningPending = joinPhase !== "idle" && joinPhase !== "ready" && joinPhase !== "error"
+
   if (!joined) {
     return (
       <main className="grid min-h-screen place-items-center bg-[#181d1b] px-4 text-[#f0f3f1]">
@@ -933,12 +1004,13 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
             Your Name
             <input
               value={name}
+              disabled={isJoiningPending}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") void join()
+                if (e.key === "Enter" && !isJoiningPending) void join()
               }}
               placeholder="e.g. Nora Patel"
-              className="mt-2 w-full rounded-xl border border-white/10 bg-[#181d1b] px-4 py-3 text-white placeholder:text-[#606b66] outline-none focus:border-[#e76f51] focus:ring-1 focus:ring-[#e76f51] transition-all"
+              className="mt-2 w-full rounded-xl border border-white/10 bg-[#181d1b] px-4 py-3 text-white placeholder:text-[#606b66] outline-none focus:border-[#e76f51] focus:ring-1 focus:ring-[#e76f51] transition-all disabled:opacity-50"
             />
           </label>
 
@@ -959,11 +1031,20 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
 
           <button
             onClick={() => void join()}
-            disabled={joiningRef.current}
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-[#e76f51] py-3.5 text-sm font-semibold text-white shadow-lg shadow-[#e76f51]/25 hover:bg-[#d05d41] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 transition-all"
+            disabled={isJoiningPending}
+            className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#e76f51] px-4 text-sm font-semibold text-white shadow-lg shadow-[#e76f51]/25 hover:bg-[#d05d41] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-75 transition-all"
           >
-            Join Meeting
-            <Link2 size={16} />
+            {isJoiningPending ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                <span>Joining...</span>
+              </>
+            ) : (
+              <>
+                <span>Join Meeting</span>
+                <Link2 size={16} />
+              </>
+            )}
           </button>
 
           <p className="mt-4 text-center text-xs text-[#7b8581]">
@@ -975,14 +1056,51 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
   }
 
   /* =======================================================
-     MEETING UI
+     MEETING UI WITH LOADING OVERLAY
      ======================================================= */
 
   const pinnedParticipant = participants.find((p) => p.id === pinnedParticipantId)
   const unpinnedParticipants = participants.filter((p) => p.id !== pinnedParticipantId)
+  const isInitializing = joinPhase !== "ready"
+
+  const getJoinPhaseLabel = (phase: JoinPhase) => {
+    switch (phase) {
+      case "requesting_media":
+        return "Accessing camera & microphone..."
+      case "connecting_ws":
+        return "Connecting to server..."
+      case "subscribing":
+        return "Subscribing to meeting channel..."
+      case "joining_room":
+        return "Sending join request..."
+      case "waiting_room_state":
+        return "Initializing room state..."
+      default:
+        return "Joining meeting..."
+    }
+  }
 
   return (
-    <main className="flex h-screen w-screen flex-col overflow-hidden bg-[#121615] text-[#f0f3f1]">
+    <main className="relative flex h-screen w-screen flex-col overflow-hidden bg-[#121615] text-[#f0f3f1]">
+      {/* FULL-SCREEN MEETING INITIALIZATION LOADING OVERLAY */}
+      {isInitializing && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#121615]/95 backdrop-blur-md p-4 text-center">
+          <div className="flex flex-col items-center gap-4 rounded-3xl border border-white/10 bg-[#181d1b] p-8 shadow-2xl max-w-sm w-full">
+            <Loader2 size={36} className="animate-spin text-[#e76f51]" />
+            <div>
+              <p className="text-base font-semibold text-white">
+                {getJoinPhaseLabel(joinPhase)}
+              </p>
+              <p className="mt-1 text-xs text-[#828e88]">
+                {slowServerNotice
+                  ? "The server is taking longer than usual. Please wait..."
+                  : "Please wait while we establish your secure WebRTC session."}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* HEADER */}
       <header className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 bg-[#181d1b] px-4 lg:px-6">
         <div className="flex items-center gap-3">
@@ -991,11 +1109,32 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
           </span>
           <div>
             <p className="text-sm font-semibold leading-tight text-white">{roomId}</p>
-            <p className="text-[11px] text-[#828e88]">{participants.length} participant{participants.length !== 1 ? "s" : ""}</p>
+            <p className="text-[11px] text-[#828e88]">
+              {participants.length} participant{participants.length !== 1 ? "s" : ""}
+            </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Copy URL Reusable Action Button */}
+          <button
+            onClick={copyMeetUrl}
+            className="flex h-9 items-center gap-1.5 rounded-xl bg-white/5 px-3 text-xs font-medium text-[#a0aba6] hover:bg-white/10 hover:text-white transition-colors"
+            title="Copy Meeting Link"
+          >
+            {copiedUrl ? (
+              <>
+                <Check size={14} className="text-emerald-400" />
+                <span className="text-emerald-400">Copied!</span>
+              </>
+            ) : (
+              <>
+                <Copy size={14} />
+                <span className="hidden sm:inline">Copy Link</span>
+              </>
+            )}
+          </button>
+
           <div
             className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
               status === "connected"
@@ -1183,10 +1322,11 @@ export default function MeetingRoom({ roomId }: { roomId: string }) {
 
           <button
             onClick={() => void leaveMeeting()}
-            className="grid size-12 place-items-center rounded-xl bg-red-600 text-white hover:bg-red-700 active:scale-95 transition-all shadow-lg shadow-red-600/20"
+            disabled={isLeaving}
+            className="grid size-12 place-items-center rounded-xl bg-red-600 text-white hover:bg-red-700 active:scale-95 disabled:opacity-50 transition-all shadow-lg shadow-red-600/20"
             title="Leave Meeting"
           >
-            <PhoneOff size={20} />
+            {isLeaving ? <Loader2 size={20} className="animate-spin" /> : <PhoneOff size={20} />}
           </button>
         </div>
       </footer>
@@ -1287,4 +1427,4 @@ function ParticipantCard({
       </div>
     </div>
   )
-}
+}git 
