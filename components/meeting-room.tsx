@@ -1427,4 +1427,4 @@ function ParticipantCard({
       </div>
     </div>
   )
-}git 
+}
