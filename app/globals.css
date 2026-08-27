@@ -160,6 +160,31 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* --- Gemini-Style Modern Minimal Scrollbar --- */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.35);
+  }
+
+  /* Firefox Thin Scrollbar Standard */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  }
 }
 
 .preview-tile {
@@ -195,7 +220,23 @@
 .control-btn { display: inline-flex; height: 42px; min-width: 42px; align-items: center; justify-content: center; gap: .5rem; border-radius: .75rem; background: rgba(255,255,255,.08); color: white; transition: background .2s; }
 .control-btn:hover { background: rgba(255,255,255,.16); }
 .chat-panel { min-height: 520px; }
-@media (max-width: 1023px) { .chat-panel { min-height: 0; max-height: 420px; } .video-grid { min-height: 0; } }
-@media (max-width: 767px) { .meeting-layout { position: relative; flex-direction: column; overflow: hidden; } .meeting-video-column { min-height: 0; } .video-grid, .video-grid-many { grid-template-columns: 1fr; } .video-card { min-height: 0; } .meeting-shell aside { position: absolute; right: 1rem; bottom: 5rem; z-index: 30; width: min(360px, calc(100% - 2rem)); height: min(60dvh, 420px); max-height: none; box-shadow: 0 18px 48px rgba(0,0,0,.35); } .meeting-shell header { padding-inline: 1rem; } .meeting-video-column > .mt-4 { position: fixed; left: 50%; bottom: .75rem; width: max-content; transform: translateX(-50%); } }
-@media (min-width: 1200px) { .video-grid-many { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (min-width: 768px) { .meeting-shell aside { width: min(360px, 32vw); flex: 0 0 min(360px, 32vw); } }
+
+@media (max-width: 1023px) { 
+  .chat-panel { min-height: 0; max-height: 420px; } 
+  .video-grid { min-height: 0; } 
+}
+@media (max-width: 767px) { 
+  .meeting-layout { position: relative; flex-direction: column; overflow: hidden; } 
+  .meeting-video-column { min-height: 0; } 
+  .video-grid, .video-grid-many { grid-template-columns: 1fr; } 
+  .video-card { min-height: 0; } 
+  .meeting-shell aside { position: absolute; right: 1rem; bottom: 5rem; z-index: 30; width: min(360px, calc(100% - 2rem)); height: min(60dvh, 420px); max-height: none; box-shadow: 0 18px 48px rgba(0,0,0,.35); } 
+  .meeting-shell header { padding-inline: 1rem; } 
+  .meeting-video-column > .mt-4 { position: fixed; left: 50%; bottom: .75rem; width: max-content; transform: translateX(-50%); } 
+}
+@media (min-width: 1200px) { 
+  .video-grid-many { grid-template-columns: repeat(3, minmax(0, 1fr)); } 
+}
+@media (min-width: 768px) { 
+  .meeting-shell aside { width: min(360px, 32vw); flex: 0 0 min(360px, 32vw); } 
+}
