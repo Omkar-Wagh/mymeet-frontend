@@ -99,7 +99,7 @@ export default function Home() {
               <button
                 onClick={handleJoinMeeting}
                 disabled={isJoiningPending}
-                className="mt-6 flex flex-1 h-12 items-center justify-center gap-2 rounded-xl bg-[#e76f51] px-4 text-sm font-semibold text-white shadow-lg shadow-[#e76f51]/25 transition-all hover:bg-[#d05d41] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-75 sm:mt-0"
+                className="flex min-h-[50px] flex-1 items-center justify-center gap-2 rounded-2xl bg-[#e76f51] px-5 py-4 text-sm font-semibold text-white shadow-lg shadow-[#e76f51]/25 transition-all hover:bg-[#d05d41] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-75"
               >
                 {isJoiningPending ? (
                   <>
@@ -116,7 +116,7 @@ export default function Home() {
 
               <button
                 onClick={copyLink}
-                className="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-[#d7d9d1] bg-white px-5 py-4 text-sm font-semibold text-[#1f2725]"
+                className="flex min-h-[50px] flex-1 items-center justify-center gap-2 rounded-2xl border border-[#d7d9d1] bg-white px-5 py-4 text-sm font-semibold text-[#1f2725] transition active:scale-[0.99]"
                 aria-label="Copy Meet URL"
               >
                 {copied ? <Check size={15} /> : <Copy size={15} />}
