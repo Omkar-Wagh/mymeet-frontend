@@ -2880,9 +2880,9 @@ export default function MeetingRoom({
 
   if (!joined) {
     return (
-      <main className="grid min-h-screen place-items-center bg-[#181d1b] px-4 text-[#f0f3f1]">
-        <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#222a27] p-8 shadow-2xl">
-          <div className="mb-8 flex items-center justify-between gap-3">
+      <main className="grid min-h-[100dvh] place-items-center bg-[#181d1b] px-4 py-6 text-[#f0f3f1]">
+        <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#222a27] p-6 sm:p-8 shadow-2xl">
+          <div className="mb-6 sm:mb-8 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <span className="grid size-10 place-items-center rounded-2xl bg-[#e76f51] text-white shadow-lg shadow-[#e76f51]/20">
                 <Video size={20} />
@@ -3044,7 +3044,7 @@ export default function MeetingRoom({
      ======================================================= */
 
   return (
-    <main className="relative flex h-screen w-screen flex-col overflow-hidden bg-[#121615] text-[#f0f3f1]">
+    <main className="relative flex h-[100dvh] w-screen flex-col overflow-hidden bg-[#121615] text-[#f0f3f1]">
       {/* ===================================================
           INITIALIZATION OVERLAY
           =================================================== */}
@@ -3078,18 +3078,19 @@ export default function MeetingRoom({
           HEADER
           =================================================== */}
 
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 bg-[#181d1b] px-4 lg:px-6">
-        <div className="flex items-center gap-3">
-          <span className="grid size-9 place-items-center rounded-xl bg-[#e76f51] text-white">
-            <Video size={18} />
+      <header className="flex h-14 sm:h-16 shrink-0 items-center justify-between border-b border-white/5 bg-[#181d1b] px-3 sm:px-4 lg:px-6">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          <span className="grid size-8 sm:size-9 shrink-0 place-items-center rounded-xl bg-[#e76f51] text-white">
+            <Video size={16} className="sm:hidden" />
+            <Video size={18} className="hidden sm:block" />
           </span>
 
-          <div>
-            <p className="text-sm font-semibold leading-tight text-white">
+          <div className="min-w-0">
+            <p className="truncate text-xs sm:text-sm font-semibold leading-tight text-white">
               {roomId}
             </p>
 
-            <p className="text-[11px] text-[#828e88]">
+            <p className="text-[10px] sm:text-[11px] text-[#828e88]">
               {uniqueParticipants.length}{" "}
               participant
               {uniqueParticipants.length !==
@@ -3100,12 +3101,12 @@ export default function MeetingRoom({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={
               copyMeetUrl
             }
-            className="flex h-9 items-center gap-1.5 rounded-xl bg-white/5 px-3 text-xs font-medium text-[#a0aba6] transition-colors hover:bg-white/10 hover:text-white"
+            className="flex h-8 sm:h-9 items-center gap-1.5 rounded-xl bg-white/5 px-2.5 sm:px-3 text-xs font-medium text-[#a0aba6] transition-colors hover:bg-white/10 hover:text-white"
             title="Copy Meeting Link"
           >
             {copiedUrl ? (
@@ -3131,7 +3132,7 @@ export default function MeetingRoom({
           </button>
 
           <div
-            className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 sm:px-3 py-1 text-xs font-medium ${
               status ===
               "connected"
                 ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
@@ -3162,7 +3163,7 @@ export default function MeetingRoom({
                   !previous
               )
             }
-            className={`relative rounded-xl p-2.5 transition-colors ${
+            className={`relative rounded-xl p-2 sm:p-2.5 transition-colors ${
               chatOpen
                 ? "bg-[#e76f51] text-white"
                 : "bg-white/5 text-[#a0aba6] hover:bg-white/10 hover:text-white"
@@ -3187,7 +3188,7 @@ export default function MeetingRoom({
           =================================================== */}
 
       {mediaWarning && (
-        <div className="border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-300">
+        <div className="border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-300 shrink-0">
           {mediaWarning}
         </div>
       )}
@@ -3196,14 +3197,14 @@ export default function MeetingRoom({
           MAIN WORKSPACE
           =================================================== */}
 
-      <div className="relative flex flex-1 gap-3 overflow-hidden p-3 lg:p-4 lg:pt-8">
+      <div className="relative flex flex-1 min-h-0 w-full overflow-hidden p-2 sm:p-3 lg:p-4">
         {/* =================================================
             VIDEO CONTAINER
             ================================================= */}
 
-        <div className="flex flex-1 flex-col items-center justify-center overflow-hidden">
+        <div className="flex flex-1 flex-col items-center justify-center overflow-hidden h-full w-full">
           {pinnedParticipant ? (
-            <div className="flex size-full flex-col gap-3 overflow-hidden lg:flex-row">
+            <div className="flex size-full flex-col gap-2 sm:gap-3 overflow-hidden lg:flex-row">
               <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-2xl border border-white/5 bg-[#1a201e]">
                 <ParticipantCard
                   participant={
@@ -3239,7 +3240,7 @@ export default function MeetingRoom({
                       key={
                         participant.id
                       }
-                      className="relative h-28 w-44 shrink-0 overflow-hidden rounded-xl border border-white/5 bg-[#1a201e] lg:h-36 lg:w-full"
+                      className="relative h-24 sm:h-28 w-36 sm:w-44 shrink-0 overflow-hidden rounded-xl border border-white/5 bg-[#1a201e] lg:h-36 lg:w-full"
                     >
                       <ParticipantCard
                         participant={
@@ -3273,7 +3274,7 @@ export default function MeetingRoom({
           ) : (
             <div className="flex size-full items-center justify-center overflow-y-auto p-1">
               <div
-                className={`grid w-full gap-3 transition-all duration-300 auto-rows-fr ${getGridClass(
+                className={`grid w-full gap-2 sm:gap-3 transition-all duration-300 auto-rows-fr ${getGridClass(
                   uniqueParticipants.length
                 )}`}
               >
@@ -3286,7 +3287,7 @@ export default function MeetingRoom({
                       key={
                         participant.id
                       }
-                      className="relative aspect-video min-h-[160px] max-h-[75vh] w-full overflow-hidden rounded-2xl border border-white/5 bg-[#1a201e] shadow-md"
+                      className="relative aspect-video min-h-[140px] sm:min-h-[160px] max-h-[75vh] w-full overflow-hidden rounded-xl sm:rounded-2xl border border-white/5 bg-[#1a201e] shadow-md"
                     >
                       <ParticipantCard
                         participant={
@@ -3331,7 +3332,7 @@ export default function MeetingRoom({
             ================================================= */}
 
         {chatOpen && (
-          <aside className="absolute inset-y-3 right-3 z-20 flex w-80 flex-col rounded-2xl border border-white/10 bg-[#181d1b] shadow-2xl lg:relative lg:inset-0">
+          <aside className="absolute inset-2 sm:inset-y-3 sm:right-3 z-30 flex w-[calc(100%-1rem)] sm:w-80 flex-col rounded-2xl border border-white/10 bg-[#181d1b] shadow-2xl lg:relative lg:inset-0">
             <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/5 px-4">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-[#a0aba6]">
                 In-Call Messages
@@ -3449,15 +3450,15 @@ export default function MeetingRoom({
           BOTTOM CONTROL BAR
           =================================================== */}
 
-      <footer className="flex h-20 shrink-0 items-center justify-center border-t border-white/5 bg-[#181d1b] px-4">
-        <div className="relative flex items-center gap-3 rounded-2xl border border-white/5 bg-white/5 p-2 backdrop-blur-md">
+      <footer className="flex shrink-0 items-center justify-center border-t border-white/5 bg-[#181d1b] px-3 py-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom,0px))]">
+        <div className="relative flex items-center gap-1.5 sm:gap-3 rounded-2xl border border-white/5 bg-white/5 p-1.5 sm:p-2 backdrop-blur-md">
           {/* MIC */}
 
           <button
             onClick={
               toggleMic
             }
-            className={`grid size-12 place-items-center rounded-xl transition-all ${
+            className={`grid size-10 sm:size-12 place-items-center rounded-xl transition-all ${
               micOn
                 ? "bg-white/10 text-white hover:bg-white/20"
                 : "border border-red-500/30 bg-red-500/20 text-red-400"
@@ -3469,9 +3470,14 @@ export default function MeetingRoom({
             }
           >
             {micOn ? (
-              <Mic size={20} />
+              <Mic size={18} className="sm:hidden" />
             ) : (
-              <MicOff size={20} />
+              <MicOff size={18} className="sm:hidden" />
+            )}
+            {micOn ? (
+              <Mic size={20} className="hidden sm:block" />
+            ) : (
+              <MicOff size={20} className="hidden sm:block" />
             )}
           </button>
 
@@ -3481,7 +3487,7 @@ export default function MeetingRoom({
             onClick={
               toggleCamera
             }
-            className={`grid size-12 place-items-center rounded-xl transition-all ${
+            className={`grid size-10 sm:size-12 place-items-center rounded-xl transition-all ${
               cameraOn
                 ? "bg-white/10 text-white hover:bg-white/20"
                 : "border border-red-500/30 bg-red-500/20 text-red-400"
@@ -3493,11 +3499,14 @@ export default function MeetingRoom({
             }
           >
             {cameraOn ? (
-              <Video size={20} />
+              <Video size={18} className="sm:hidden" />
             ) : (
-              <VideoOff
-                size={20}
-              />
+              <VideoOff size={18} className="sm:hidden" />
+            )}
+            {cameraOn ? (
+              <Video size={20} className="hidden sm:block" />
+            ) : (
+              <VideoOff size={20} className="hidden sm:block" />
             )}
           </button>
 
@@ -3507,7 +3516,7 @@ export default function MeetingRoom({
             onClick={() =>
               void toggleScreenShare()
             }
-            className={`grid size-12 place-items-center rounded-xl transition-all ${
+            className={`grid size-10 sm:size-12 place-items-center rounded-xl transition-all ${
               isScreenSharing
                 ? "border border-emerald-500/30 bg-emerald-500/20 text-emerald-400"
                 : "bg-white/10 text-white hover:bg-white/20"
@@ -3519,13 +3528,14 @@ export default function MeetingRoom({
             }
           >
             {isScreenSharing ? (
-              <MonitorOff
-                size={20}
-              />
+              <MonitorOff size={18} className="sm:hidden" />
             ) : (
-              <Monitor
-                size={20}
-              />
+              <Monitor size={18} className="sm:hidden" />
+            )}
+            {isScreenSharing ? (
+              <MonitorOff size={20} className="hidden sm:block" />
+            ) : (
+              <Monitor size={20} className="hidden sm:block" />
             )}
           </button>
 
@@ -3535,7 +3545,7 @@ export default function MeetingRoom({
             onClick={
               toggleHandRaise
             }
-            className={`grid size-12 place-items-center rounded-xl transition-all ${
+            className={`grid size-10 sm:size-12 place-items-center rounded-xl transition-all ${
               handRaised
                 ? "border border-amber-500/30 bg-amber-500/20 text-amber-400"
                 : "bg-white/10 text-white hover:bg-white/20"
@@ -3546,7 +3556,8 @@ export default function MeetingRoom({
                 : "Raise Hand"
             }
           >
-            <Hand size={20} />
+            <Hand size={18} className="sm:hidden" />
+            <Hand size={20} className="hidden sm:block" />
           </button>
 
           {/* REACTION */}
@@ -3559,18 +3570,19 @@ export default function MeetingRoom({
                     !previous
                 )
               }
-              className={`grid size-12 place-items-center rounded-xl transition-all ${
+              className={`grid size-10 sm:size-12 place-items-center rounded-xl transition-all ${
                 showReactions
                   ? "bg-[#e76f51] text-white ring-2 ring-[#e76f51]/40"
                   : "bg-white/10 text-white hover:bg-white/20"
               }`}
               title="Send Reaction"
             >
-              <Smile size={20} />
+              <Smile size={18} className="sm:hidden" />
+              <Smile size={20} className="hidden sm:block" />
             </button>
 
             {showReactions && (
-              <div className="absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-2xl border border-white/15 bg-[#1e2522]/95 p-2 shadow-2xl backdrop-blur-xl">
+              <div className="absolute bottom-14 sm:bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-1 sm:gap-1.5 rounded-2xl border border-white/15 bg-[#1e2522]/95 p-1.5 sm:p-2 shadow-2xl backdrop-blur-xl">
                 {REACTION_EMOJIS.map(
                   (emoji) => (
                     <button
@@ -3580,14 +3592,14 @@ export default function MeetingRoom({
                           emoji
                         )
                       }
-                      className="flex size-10 items-center justify-center rounded-xl text-xl transition-all hover:scale-125 hover:bg-white/10 active:scale-95"
+                      className="flex size-8 sm:size-10 items-center justify-center rounded-xl text-lg sm:text-xl transition-all hover:scale-125 hover:bg-white/10 active:scale-95"
                     >
                       {emoji}
                     </button>
                   )
                 )}
 
-                <div className="mx-1 h-6 w-px bg-white/10" />
+                <div className="mx-0.5 sm:mx-1 h-5 sm:h-6 w-px bg-white/10" />
 
                 <button
                   onClick={() =>
@@ -3595,7 +3607,7 @@ export default function MeetingRoom({
                       false
                     )
                   }
-                  className="rounded-lg p-1.5 text-xs text-[#a0aba6] transition-colors hover:bg-white/5 hover:text-white"
+                  className="rounded-lg p-1 sm:p-1.5 text-xs text-[#a0aba6] transition-colors hover:bg-white/5 hover:text-white"
                 >
                   <X size={14} />
                 </button>
@@ -3612,17 +3624,29 @@ export default function MeetingRoom({
             disabled={
               isLeaving
             }
-            className="grid size-12 place-items-center rounded-xl bg-red-600 text-white shadow-lg shadow-red-600/20 transition-all hover:bg-red-700 active:scale-95 disabled:opacity-50"
+            className="grid size-10 sm:size-12 place-items-center rounded-xl bg-red-600 text-white shadow-lg shadow-red-600/20 transition-all hover:bg-red-700 active:scale-95 disabled:opacity-50"
             title="Leave Meeting"
           >
             {isLeaving ? (
               <Loader2
+                size={18}
+                className="animate-spin sm:hidden"
+              />
+            ) : (
+              <PhoneOff
+                size={18}
+                className="sm:hidden"
+              />
+            )}
+            {isLeaving ? (
+              <Loader2
                 size={20}
-                className="animate-spin"
+                className="animate-spin hidden sm:block"
               />
             ) : (
               <PhoneOff
                 size={20}
+                className="hidden sm:block"
               />
             )}
           </button>
@@ -3727,7 +3751,7 @@ function ParticipantCard({
 
       {isCameraDisabled && (
         <div className="flex flex-col items-center justify-center gap-2">
-          <span className="grid size-16 place-items-center rounded-full bg-white/10 text-xl font-bold text-white shadow-md ring-1 ring-white/20">
+          <span className="grid size-12 sm:size-16 place-items-center rounded-full bg-white/10 text-base sm:text-xl font-bold text-white shadow-md ring-1 ring-white/20">
             {initials(
               participant.name
             )}
@@ -3740,9 +3764,14 @@ function ParticipantCard({
           ================================================= */}
 
       {participant.screenSharing && (
-        <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5 rounded-full bg-emerald-500/90 px-3 py-1 text-xs font-semibold text-black shadow-lg">
+        <div className="absolute right-2 sm:right-3 top-2 sm:top-3 z-20 flex items-center gap-1 sm:gap-1.5 rounded-full bg-emerald-500/90 px-2 sm:px-3 py-0.5 sm:py-1 text-[10px] sm:text-xs font-semibold text-black shadow-lg">
+          <Monitor
+            size={12}
+            className="sm:hidden"
+          />
           <Monitor
             size={14}
+            className="hidden sm:block"
           />
 
           <span>
@@ -3758,14 +3787,14 @@ function ParticipantCard({
           ================================================= */}
 
       {participant.reaction && (
-        <div className="absolute bottom-14 left-3 z-20 flex items-center gap-2 rounded-2xl border border-white/20 bg-[#1e2522]/90 px-3 py-1.5 shadow-2xl backdrop-blur-md">
-          <span className="animate-bounce text-2xl">
+        <div className="absolute bottom-10 sm:bottom-14 left-2 sm:left-3 z-20 flex items-center gap-1.5 sm:gap-2 rounded-2xl border border-white/20 bg-[#1e2522]/90 px-2.5 sm:px-3 py-1 sm:py-1.5 shadow-2xl backdrop-blur-md">
+          <span className="animate-bounce text-xl sm:text-2xl">
             {
               participant.reaction
             }
           </span>
 
-          <span className="text-xs font-semibold text-white/90">
+          <span className="text-[10px] sm:text-xs font-semibold text-white/90">
             {isLocal
               ? "You"
               : participant.name}
@@ -3778,8 +3807,9 @@ function ParticipantCard({
           ================================================= */}
 
       {participant.handRaised && (
-        <div className="absolute left-3 top-3 z-20 flex items-center gap-1.5 rounded-full bg-amber-500/90 px-3 py-1 text-xs font-semibold text-black shadow-lg">
-          <Hand size={14} />
+        <div className="absolute left-2 sm:left-3 top-2 sm:top-3 z-20 flex items-center gap-1 sm:gap-1.5 rounded-full bg-amber-500/90 px-2 sm:px-3 py-0.5 sm:py-1 text-[10px] sm:text-xs font-semibold text-black shadow-lg">
+          <Hand size={12} className="sm:hidden" />
+          <Hand size={14} className="hidden sm:block" />
 
           <span>
             Hand Raised
@@ -3791,17 +3821,17 @@ function ParticipantCard({
           BOTTOM OVERLAY
           ================================================= */}
 
-      <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 pt-8">
+      <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 sm:gap-3 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-2 sm:p-3 pt-6 sm:pt-8">
         {/* NAME */}
 
         <div className="min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="inline-block min-w-[9ch] max-w-full whitespace-normal break-words text-xs font-medium leading-5 text-white">
+          <span className="inline-block min-w-[5ch] sm:min-w-[9ch] max-w-full whitespace-normal break-words text-[11px] sm:text-xs font-medium leading-4 sm:leading-5 text-white">
             {participant.name}{" "}
             {isLocal && "(You)"}
           </span>
 
           {participant.screenSharing && (
-            <span className="ml-2 shrink-0 text-[10px] text-emerald-300">
+            <span className="ml-1 sm:ml-2 shrink-0 text-[9px] sm:text-[10px] text-emerald-300">
               Sharing
             </span>
           )}
@@ -3809,7 +3839,7 @@ function ParticipantCard({
 
         {/* CONTROLS */}
 
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
           {/* MIC STATUS */}
 
           <span
