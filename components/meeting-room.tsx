@@ -317,41 +317,47 @@ export default function MeetingRoom({
      INITIALIZE PARTICIPANT
      ======================================================= */
 
-  useEffect(() => {
-    if (!participantIdRef.current) {
-      const storedParticipantId =
-        sessionStorage.getItem(
-          participantStorageKey
-        )
 
-      participantIdRef.current =
-        storedParticipantId ||
-        crypto.randomUUID()
+  /* =========================================================
+   INITIALIZE PARTICIPANT
+   ========================================================= */
 
-      sessionStorage.setItem(
-        participantStorageKey,
-        participantIdRef.current
-      )
-    }
+    useEffect(() => {
+      if (!participantIdRef.current) {
+        const storedParticipantId =
+          localStorage.getItem(
+            participantStorageKey
+          )
 
-    const storedName =
-      sessionStorage.getItem("mymeet-name")
+        participantIdRef.current =
+          storedParticipantId ||
+          crypto.randomUUID()
 
-    if (storedName) {
-      nameRef.current = storedName
-      setName(storedName)
-    }
-
-    return () => {
-      mountedRef.current = false
-
-      if (slowNoticeTimerRef.current) {
-        clearTimeout(
-          slowNoticeTimerRef.current
+        localStorage.setItem(
+          participantStorageKey,
+          participantIdRef.current
         )
       }
-    }
-  }, [])
+
+      const storedName =
+        sessionStorage.getItem("mymeet-name")
+
+      if (storedName) {
+        nameRef.current = storedName
+        setName(storedName)
+      }
+
+      return () => {
+        mountedRef.current = false
+
+        if (slowNoticeTimerRef.current) {
+          clearTimeout(
+            slowNoticeTimerRef.current
+          )
+        }
+      }
+    }, [])
+
 
   /* =======================================================
      LOCAL VIDEO REF
