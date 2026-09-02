@@ -266,6 +266,16 @@ export default function MeetingRoom({
   const participantIdRef =
     useRef<string>("")
 
+  /*
+   * Keep one logical participant identity for this room
+   * across refreshes/reconnects in the same browser tab.
+   */
+  const participantStorageKey =
+    `mymeet:${roomId}:participantId`
+
+  const establishedConnectionRef =
+    useRef(false)
+
   const nameRef =
     useRef<string>("Guest")
 
@@ -309,8 +319,19 @@ export default function MeetingRoom({
 
   useEffect(() => {
     if (!participantIdRef.current) {
+      const storedParticipantId =
+        sessionStorage.getItem(
+          participantStorageKey
+        )
+
       participantIdRef.current =
+        storedParticipantId ||
         crypto.randomUUID()
+
+      sessionStorage.setItem(
+        participantStorageKey,
+        participantIdRef.current
+      )
     }
 
     const storedName =
@@ -1114,6 +1135,9 @@ export default function MeetingRoom({
             )
           }
 
+          establishedConnectionRef.current =
+            true
+
           setJoinPhase("ready")
 
           if (
@@ -1847,8 +1871,19 @@ export default function MeetingRoom({
 
       try {
         if (!participantIdRef.current) {
+          const storedParticipantId =
+            sessionStorage.getItem(
+              participantStorageKey
+            )
+
           participantIdRef.current =
+            storedParticipantId ||
             crypto.randomUUID()
+
+          sessionStorage.setItem(
+            participantStorageKey,
+            participantIdRef.current
+          )
         }
 
         const displayName =
@@ -1940,10 +1975,24 @@ export default function MeetingRoom({
                 return
               }
 
+              const reconnecting =
+                establishedConnectionRef.current
+
               setStatus("connected")
-              setJoinPhase(
-                "subscribing"
-              )
+
+              /*
+               * During a reconnect, keep the existing meeting
+               * UI visible. The ROOM_STATE below will refresh
+               * authoritative participant state.
+               *
+               * Only the initial connection uses the
+               * initialization overlay.
+               */
+              if (!reconnecting) {
+                setJoinPhase(
+                  "subscribing"
+                )
+              }
 
               const subscription =
                 client.subscribe(
@@ -1955,9 +2004,11 @@ export default function MeetingRoom({
                 subscription,
               ]
 
-              setJoinPhase(
-                "joining_room"
-              )
+              if (!reconnecting) {
+                setJoinPhase(
+                  "joining_room"
+                )
+              }
 
               const joinPayload = {
                 roomId,
@@ -1980,9 +2031,11 @@ export default function MeetingRoom({
                   ),
               })
 
-              setJoinPhase(
-                "waiting_room_state"
-              )
+              if (!reconnecting) {
+                setJoinPhase(
+                  "waiting_room_state"
+                )
+              }
             },
 
             onStompError: () => {
@@ -1992,23 +2045,32 @@ export default function MeetingRoom({
               ) {
                 setStatus("offline")
 
-                setJoinError(
-                  "Unable to connect to the meeting server."
-                )
-
-                setJoinPhase(
-                  "error"
-                )
-
-                joiningRef.current =
-                  false
-
+                /*
+                 * Once the meeting has been established, do not
+                 * destroy the meeting UI for a temporary STOMP
+                 * failure. The STOMP client will reconnect.
+                 */
                 if (
-                  slowNoticeTimerRef.current
+                  !establishedConnectionRef.current
                 ) {
-                  clearTimeout(
-                    slowNoticeTimerRef.current
+                  setJoinError(
+                    "Unable to connect to the meeting server."
                   )
+
+                  setJoinPhase(
+                    "error"
+                  )
+
+                  joiningRef.current =
+                    false
+
+                  if (
+                    slowNoticeTimerRef.current
+                  ) {
+                    clearTimeout(
+                      slowNoticeTimerRef.current
+                    )
+                  }
                 }
               }
             },
@@ -2020,16 +2082,20 @@ export default function MeetingRoom({
               ) {
                 setStatus("offline")
 
-                setJoinError(
-                  "WebSocket connection failed."
-                )
+                if (
+                  !establishedConnectionRef.current
+                ) {
+                  setJoinError(
+                    "WebSocket connection failed."
+                  )
 
-                setJoinPhase(
-                  "error"
-                )
+                  setJoinPhase(
+                    "error"
+                  )
 
-                joiningRef.current =
-                  false
+                  joiningRef.current =
+                    false
+                }
               }
             },
 
@@ -2070,6 +2136,7 @@ export default function MeetingRoom({
       getLocalMedia,
       joined,
       name,
+      participantStorageKey,
       roomId,
       signal,
     ]
@@ -2226,8 +2293,14 @@ export default function MeetingRoom({
 
       joiningRef.current = false
       leavingRef.current = false
+      establishedConnectionRef.current =
+        false
     },
-    [closePeer, roomId]
+    [
+      closePeer,
+      participantStorageKey,
+      roomId,
+    ]
   )
 
   const leaveMeeting =
