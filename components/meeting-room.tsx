@@ -80,6 +80,7 @@ type Signal = {
   roomId?: string
   participantId?: string
   targetParticipantId?: string
+  connectionId?: string
 
   name?: string
   message?: string
