@@ -70,6 +70,7 @@ type RoomParticipant = {
   cameraOff?: boolean
   handRaised?: boolean
   screenSharing?: boolean
+  reaction?: string | null
 }
 
 type Signal = {
@@ -113,6 +114,7 @@ type Signal = {
     cameraOff?: boolean
     handRaised?: boolean
     screenSharing?: boolean
+    reaction?: string | null
 
     emoji?: string
 
@@ -966,9 +968,20 @@ export default function MeetingRoom({
                 existing?.screenSharing ??
                 false,
 
+              /*
+               * Reaction is also part of the participant snapshot when
+               * the backend provides it. Never manufacture a reaction
+               * value for a participant that has not supplied one.
+               *
+               * If the current ROOM_STATE does not contain reaction,
+               * preserve the currently rendered transient reaction so
+               * an unrelated join/leave snapshot cannot clear it.
+               */
               reaction:
-                existing?.reaction ??
-                null,
+                participant.reaction !==
+                undefined
+                  ? participant.reaction
+                  : existing?.reaction,
 
               stream:
                 existing?.stream,
@@ -1341,9 +1354,18 @@ export default function MeetingRoom({
                     ...participant,
                     stream:
                       existing?.stream,
+                    /*
+                     * ROOM_STATE is authoritative for participant
+                     * state. If the backend includes reaction, use it.
+                     * If reaction is omitted by the backend, preserve the
+                     * currently displayed transient reaction instead of
+                     * resetting it because another participant joined/left.
+                     */
                     reaction:
-                      existing?.reaction ??
-                      null,
+                      participant.reaction !==
+                      undefined
+                        ? participant.reaction
+                        : existing?.reaction,
                   }
                 }
               )
@@ -1427,67 +1449,17 @@ export default function MeetingRoom({
             return
           }
 
-          setParticipants(
-            (current) => {
-              const existing =
-                current.find(
-                  (participant) =>
-                    participant.id ===
-                    remoteId
-                )
-
-              if (existing) {
-                return current.map(
-                  (participant) =>
-                    participant.id ===
-                    remoteId
-                      ? {
-                          ...participant,
-                          name:
-                            data.name?.trim() ||
-                            participant.name,
-                          muted:
-                            data.muted ??
-                            participant.muted,
-                          cameraOff:
-                            data.cameraOff ??
-                            participant.cameraOff,
-                          handRaised:
-                            data.handRaised ??
-                            participant.handRaised,
-                          screenSharing:
-                            data.screenSharing ??
-                            participant.screenSharing,
-                        }
-                      : participant
-                )
-              }
-
-              return [
-                ...current,
-                {
-                  id: remoteId,
-                  name:
-                    data.name?.trim() ||
-                    "Guest",
-                  muted:
-                    data.muted ??
-                    false,
-                  cameraOff:
-                    data.cameraOff ??
-                    false,
-                  handRaised:
-                    data.handRaised ??
-                    false,
-                  screenSharing:
-                    data.screenSharing ??
-                    false,
-                  reaction: null,
-                },
-              ]
-            }
-          )
-
+          /*
+           * ROOM_STATE is the authoritative participant snapshot.
+           *
+           * Do NOT create a participant here with default values such as
+           * muted=false, cameraOff=false, handRaised=false, etc.
+           * PARTICIPANT_JOINED may arrive before/around ROOM_STATE and
+           * those defaults can overwrite the real backend state visually.
+           *
+           * We only use the join event to start WebRTC negotiation.
+           * The participant card/state is rendered from ROOM_STATE.
+           */
           await createOffer(
             remoteId
           )
@@ -2144,49 +2116,15 @@ export default function MeetingRoom({
           )
         }
 
-        const initialMicOn =
-          stream
-            ? stream
-                .getAudioTracks()
-                .some(
-                  (track) =>
-                    track.enabled
-                )
-            : false
-
-        const initialCameraOn =
-          stream
-            ? stream
-                .getVideoTracks()
-                .some(
-                  (track) =>
-                    track.enabled
-                )
-            : false
-
-        setParticipants([
-          {
-            id:
-              participantIdRef.current,
-            name: displayName,
-            stream:
-              stream ||
-              undefined,
-            muted:
-              !initialMicOn,
-            cameraOff:
-              !initialCameraOn,
-            handRaised: false,
-            screenSharing: false,
-            reaction: null,
-          },
-        ])
-
-        setMicOn(initialMicOn)
-        setCameraOn(initialCameraOn)
-        setHandRaised(false)
-        setIsScreenSharing(false)
-
+        /*
+         * Do not create a local participant from local media defaults.
+         * The backend ROOM_STATE is the source of truth for participant
+         * state (mic, camera, hand raise, screen share and reaction).
+         *
+         * Keeping the participant list untouched here also prevents a
+         * reconnect/join from temporarily replacing authoritative state
+         * with client-side defaults.
+         */
         setJoined(true)
 
         setJoinPhase(
