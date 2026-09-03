@@ -2412,7 +2412,7 @@ export default function MeetingRoom({
                   !establishedConnectionRef.current
                 ) {
                   setJoinError(
-                    "WebSocket connection failed."
+                    "Please refresh the page once to reconnect."
                   )
 
                   setJoinPhase(
