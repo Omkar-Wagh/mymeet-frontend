@@ -244,6 +244,9 @@ export default function MeetingRoom({
   const [joinError, setJoinError] =
     useState<string | null>(null)
 
+  const [sessionReplaced, setSessionReplaced] =
+    useState(false)
+
   /* =======================================================
      REFS
      ======================================================= */
@@ -264,6 +267,14 @@ export default function MeetingRoom({
     useRef<HTMLVideoElement | null>(null)
 
   const participantIdRef =
+    useRef<string>("")
+
+  /*
+   * Unique identity for this browser tab's active MyMeet session.
+   * The participantId remains stable across reconnects, while this
+   * value lets the backend/frontend distinguish a replaced tab.
+   */
+  const connectionIdRef =
     useRef<string>("")
 
   /*
@@ -342,6 +353,11 @@ export default function MeetingRoom({
        * Always restore the mounted flag at setup time.
        */
       mountedRef.current = true
+
+      if (!connectionIdRef.current) {
+        connectionIdRef.current =
+          crypto.randomUUID()
+      }
 
       if (!participantIdRef.current) {
         const storedParticipantId =
@@ -1196,6 +1212,105 @@ export default function MeetingRoom({
           parsed.data || parsed
 
         /* ===================================================
+           SESSION REPLACED
+           =================================================== */
+
+        if (
+          type ===
+          "PARTICIPANT_SESSION_REPLACED"
+        ) {
+          const replacedParticipantId =
+            data.participantId
+
+          const activeConnectionId =
+            data.connectionId
+
+          /*
+           * The new tab receives this event too. Only the tab whose
+           * connectionId differs from the active connection must shut
+           * itself down.
+           */
+          if (
+            replacedParticipantId ===
+              participantIdRef.current &&
+            activeConnectionId &&
+            activeConnectionId !==
+              connectionIdRef.current
+          ) {
+            setSessionReplaced(true)
+            setStatus("offline")
+            setJoinPhase("idle")
+            setJoined(false)
+
+            if (slowNoticeTimerRef.current) {
+              clearTimeout(
+                slowNoticeTimerRef.current
+              )
+              slowNoticeTimerRef.current = null
+            }
+
+            reactionTimersRef.current.forEach(
+              (timer) => clearTimeout(timer)
+            )
+            reactionTimersRef.current.clear()
+
+            subscriptionsRef.current.forEach(
+              (subscription) => {
+                try {
+                  subscription.unsubscribe()
+                } catch {
+                  // Ignore cleanup errors.
+                }
+              }
+            )
+            subscriptionsRef.current = []
+
+            peerConnectionsRef.current.forEach(
+              (_, id) => closePeer(id)
+            )
+            peerConnectionsRef.current.clear()
+            peerStatesRef.current.clear()
+            pendingIceCandidatesRef.current.clear()
+
+            remoteVideoRefs.current.forEach(
+              (video) => {
+                video.srcObject = null
+              }
+            )
+            remoteVideoRefs.current.clear()
+
+            screenStreamRef.current
+              ?.getTracks()
+              .forEach((track) => track.stop())
+            screenStreamRef.current = null
+
+            localStreamRef.current
+              ?.getTracks()
+              .forEach((track) => track.stop())
+            localStreamRef.current = null
+
+            if (localVideoElementRef.current) {
+              localVideoElementRef.current.srcObject = null
+            }
+
+            const replacedClient = clientRef.current
+            clientRef.current = null
+
+            if (replacedClient) {
+              void replacedClient.deactivate().catch(() => {})
+            }
+
+            joiningRef.current = false
+            leavingRef.current = false
+            establishedConnectionRef.current = false
+
+            return
+          }
+
+          return
+        }
+
+        /* ===================================================
            ROOM STATE
            =================================================== */
 
@@ -1974,6 +2089,7 @@ export default function MeetingRoom({
 
       joiningRef.current = true
       leavingRef.current = false
+      setSessionReplaced(false)
 
       setJoinError(null)
       setSlowServerNotice(false)
@@ -2158,6 +2274,8 @@ export default function MeetingRoom({
                 roomId,
                 participantId:
                   participantIdRef.current,
+                connectionId:
+                  connectionIdRef.current,
                 name:
                   nameRef.current,
                 muted:
@@ -2544,6 +2662,10 @@ export default function MeetingRoom({
       ) => {
         event?.preventDefault()
 
+        if (sessionReplaced) {
+          return
+        }
+
         const text =
           draft.trim()
 
@@ -2571,6 +2693,7 @@ export default function MeetingRoom({
         draft,
         publish,
         roomId,
+        sessionReplaced,
       ]
     )
 
@@ -2580,6 +2703,10 @@ export default function MeetingRoom({
 
   const toggleMic =
     useCallback(() => {
+      if (sessionReplaced) {
+        return
+      }
+
       const stream =
         localStreamRef.current
 
@@ -2629,6 +2756,7 @@ export default function MeetingRoom({
       micOn,
       publish,
       roomId,
+      sessionReplaced,
     ])
 
   /* =======================================================
@@ -2637,6 +2765,10 @@ export default function MeetingRoom({
 
   const toggleCamera =
     useCallback(() => {
+      if (sessionReplaced) {
+        return
+      }
+
       const stream =
         localStreamRef.current
 
@@ -2685,6 +2817,7 @@ export default function MeetingRoom({
       micOn,
       publish,
       roomId,
+      sessionReplaced,
     ])
 
   /* =======================================================
@@ -2693,6 +2826,10 @@ export default function MeetingRoom({
 
   const toggleScreenShare =
     useCallback(async () => {
+      if (sessionReplaced) {
+        return
+      }
+
       if (isScreenSharing) {
         if (
           screenStreamRef.current
@@ -2911,6 +3048,7 @@ export default function MeetingRoom({
       isScreenSharing,
       publish,
       roomId,
+      sessionReplaced,
     ])
 
   /* =======================================================
@@ -2919,6 +3057,10 @@ export default function MeetingRoom({
 
   const toggleHandRaise =
     useCallback(() => {
+      if (sessionReplaced) {
+        return
+      }
+
       const nextState =
         !handRaised
 
@@ -2955,6 +3097,7 @@ export default function MeetingRoom({
       handRaised,
       publish,
       roomId,
+      sessionReplaced,
     ])
 
   /* =======================================================
@@ -2964,6 +3107,10 @@ export default function MeetingRoom({
   const sendReaction =
     useCallback(
       (emoji: string) => {
+        if (sessionReplaced) {
+          return
+        }
+
         setShowReactions(false)
 
         triggerReactionDisplay(
@@ -2985,6 +3132,7 @@ export default function MeetingRoom({
         publish,
         roomId,
         triggerReactionDisplay,
+        sessionReplaced,
       ]
     )
 
@@ -3280,6 +3428,25 @@ export default function MeetingRoom({
                   : "Please wait while we establish your secure WebRTC session."}
               </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {sessionReplaced && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#121615]/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#181d1b] p-6 text-center shadow-2xl">
+            <div className="mx-auto mb-4 grid size-12 place-items-center rounded-2xl bg-amber-500/15 text-amber-400">
+              <Video size={22} />
+            </div>
+            <h2 className="text-base font-semibold text-white">
+              Meeting opened in another tab
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-[#9aa59f]">
+              This tab is no longer the active meeting session. Your camera and microphone have been released.
+            </p>
+            <p className="mt-3 text-xs text-[#68736e]">
+              Use the other tab to continue the meeting.
+            </p>
           </div>
         </div>
       )}
@@ -3638,13 +3805,19 @@ export default function MeetingRoom({
                       .value
                   )
                 }
-                placeholder="Send a message..."
+                placeholder={
+                  sessionReplaced
+                    ? "Session replaced"
+                    : "Send a message..."
+                }
+                disabled={sessionReplaced}
                 className="flex-1 rounded-xl bg-white/5 px-3 py-2 text-xs text-white outline-none placeholder:text-[#606b66] focus:ring-1 focus:ring-[#e76f51]"
               />
 
               <button
                 type="submit"
                 disabled={
+                  sessionReplaced ||
                   !draft.trim()
                 }
                 className="grid size-8 shrink-0 place-items-center rounded-xl bg-[#e76f51] text-white transition-colors hover:bg-[#d05d41] disabled:opacity-40"
@@ -3668,6 +3841,7 @@ export default function MeetingRoom({
             onClick={
               toggleMic
             }
+            disabled={sessionReplaced}
             className={`grid size-10 sm:size-12 place-items-center rounded-xl transition-all ${
               micOn
                 ? "bg-white/10 text-white hover:bg-white/20"
@@ -3697,6 +3871,7 @@ export default function MeetingRoom({
             onClick={
               toggleCamera
             }
+            disabled={sessionReplaced}
             className={`grid size-10 sm:size-12 place-items-center rounded-xl transition-all ${
               cameraOn
                 ? "bg-white/10 text-white hover:bg-white/20"
@@ -3726,6 +3901,7 @@ export default function MeetingRoom({
             onClick={() =>
               void toggleScreenShare()
             }
+            disabled={sessionReplaced}
             className={`grid size-10 sm:size-12 place-items-center rounded-xl transition-all ${
               isScreenSharing
                 ? "border border-emerald-500/30 bg-emerald-500/20 text-emerald-400"
@@ -3755,6 +3931,7 @@ export default function MeetingRoom({
             onClick={
               toggleHandRaise
             }
+            disabled={sessionReplaced}
             className={`grid size-10 sm:size-12 place-items-center rounded-xl transition-all ${
               handRaised
                 ? "border border-amber-500/30 bg-amber-500/20 text-amber-400"
