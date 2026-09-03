@@ -313,16 +313,31 @@ export default function MeetingRoom({
       null
     )
 
-  /* =======================================================
-     INITIALIZE PARTICIPANT
-     ======================================================= */
-
+  /*
+   * Keep one reaction timer per participant.
+   * This prevents an older reaction timeout from
+   * clearing a newer reaction too early.
+   */
+  const reactionTimersRef =
+    useRef<
+      Map<
+        string,
+        ReturnType<typeof setTimeout>
+      >
+    >(new Map())
 
   /* =========================================================
    INITIALIZE PARTICIPANT
    ========================================================= */
 
     useEffect(() => {
+      /*
+       * React Strict Mode runs effects as:
+       * setup -> cleanup -> setup.
+       * Always restore the mounted flag at setup time.
+       */
+      mountedRef.current = true
+
       if (!participantIdRef.current) {
         const storedParticipantId =
           localStorage.getItem(
@@ -363,21 +378,81 @@ export default function MeetingRoom({
      LOCAL VIDEO REF
      ======================================================= */
 
+  /*
+   * The local <video> element can be unmounted/remounted when
+   * pinning, opening chat, or changing the responsive layout.
+   * Always bind the current active stream after the element exists.
+   */
+  const bindLocalVideo = useCallback(() => {
+    const video =
+      localVideoElementRef.current
+
+    if (!video) {
+      return
+    }
+
+    const activeStream =
+      screenStreamRef.current ||
+      localStreamRef.current
+
+    if (!activeStream) {
+      video.srcObject = null
+      return
+    }
+
+    if (video.srcObject !== activeStream) {
+      video.srcObject = activeStream
+    }
+
+    video.muted = true
+    video.autoplay = true
+    video.playsInline = true
+
+    if (video.paused) {
+      void video.play().catch(() => {})
+    }
+  }, [])
+
   const setLocalVideoRef = useCallback(
     (element: HTMLVideoElement | null) => {
-      localVideoElementRef.current = element
+      localVideoElementRef.current =
+        element
 
-      const activeStream =
-        screenStreamRef.current ||
-        localStreamRef.current
-
-      if (element && activeStream) {
-        element.srcObject = activeStream
-        void element.play().catch(() => {})
+      if (element) {
+        bindLocalVideo()
       }
     },
-    []
+    [bindLocalVideo]
   )
+
+  /*
+   * Rebind after layout/remount changes.
+   * requestAnimationFrame waits until React has committed
+   * the new video element to the DOM.
+   */
+  useEffect(() => {
+    if (!joined) {
+      return
+    }
+
+    let frameId = 0
+
+    frameId =
+      requestAnimationFrame(() => {
+        bindLocalVideo()
+      })
+
+    return () => {
+      cancelAnimationFrame(frameId)
+    }
+  }, [
+    bindLocalVideo,
+    joined,
+    cameraOn,
+    isScreenSharing,
+    chatOpen,
+    pinnedParticipantId,
+  ])
 
   /* =======================================================
      PUBLISH
@@ -434,6 +509,13 @@ export default function MeetingRoom({
 
         localStreamRef.current = stream
 
+        /*
+         * If the video element is already mounted, immediately
+         * attach the newly acquired stream. The layout effect
+         * below will also rebind after React updates.
+         */
+        bindLocalVideo()
+
         const audioEnabled =
           stream
             .getAudioTracks()
@@ -485,7 +567,7 @@ export default function MeetingRoom({
 
         return null
       }
-    }, [])
+    }, [bindLocalVideo])
 
   /* =======================================================
      REMOTE STREAM
@@ -1031,6 +1113,23 @@ export default function MeetingRoom({
         participantId: string,
         emoji: string
       ) => {
+        if (!participantId || !emoji) {
+          return
+        }
+
+        /*
+         * Cancel only this participant's previous reaction timer.
+         * Other participants' reactions remain independent.
+         */
+        const existingTimer =
+          reactionTimersRef.current.get(
+            participantId
+          )
+
+        if (existingTimer) {
+          clearTimeout(existingTimer)
+        }
+
         setParticipants((current) =>
           current.map(
             (participant) =>
@@ -1044,21 +1143,30 @@ export default function MeetingRoom({
           )
         )
 
-        setTimeout(() => {
-          setParticipants((current) =>
-            current.map(
-              (participant) =>
-                participant.id ===
-                participantId
-                  ? {
-                      ...participant,
-                      reaction:
-                        null,
-                    }
-                  : participant
+        const timer =
+          setTimeout(() => {
+            setParticipants((current) =>
+              current.map(
+                (participant) =>
+                  participant.id ===
+                  participantId
+                    ? {
+                        ...participant,
+                        reaction: null,
+                      }
+                    : participant
+              )
             )
-          )
-        }, 3500)
+
+            reactionTimersRef.current.delete(
+              participantId
+            )
+          }, 3500)
+
+        reactionTimersRef.current.set(
+          participantId,
+          timer
+        )
       },
       []
     )
@@ -1878,7 +1986,7 @@ export default function MeetingRoom({
       try {
         if (!participantIdRef.current) {
           const storedParticipantId =
-            sessionStorage.getItem(
+            localStorage.getItem(
               participantStorageKey
             )
 
@@ -1886,7 +1994,7 @@ export default function MeetingRoom({
             storedParticipantId ||
             crypto.randomUUID()
 
-          sessionStorage.setItem(
+          localStorage.setItem(
             participantStorageKey,
             participantIdRef.current
           )
@@ -2016,6 +2124,31 @@ export default function MeetingRoom({
                 )
               }
 
+              /*
+               * Read the actual current track state here.
+               * Do not reuse initialMicOn/initialCameraOn because
+               * the user may have toggled media before a reconnect.
+               */
+              const currentMicOn =
+                localStreamRef.current
+                  ?.getAudioTracks()
+                  .some(
+                    (track) =>
+                      track.readyState ===
+                        "live" &&
+                      track.enabled
+                  ) ?? false
+
+              const currentCameraOn =
+                localStreamRef.current
+                  ?.getVideoTracks()
+                  .some(
+                    (track) =>
+                      track.readyState ===
+                        "live" &&
+                      track.enabled
+                  ) ?? false
+
               const joinPayload = {
                 roomId,
                 participantId:
@@ -2023,9 +2156,9 @@ export default function MeetingRoom({
                 name:
                   nameRef.current,
                 muted:
-                  !initialMicOn,
+                  !currentMicOn,
                 cameraOff:
-                  !initialCameraOn,
+                  !currentCameraOn,
               }
 
               client.publish({
@@ -2169,6 +2302,12 @@ export default function MeetingRoom({
         )
       }
 
+      reactionTimersRef.current.forEach(
+        (timer) => clearTimeout(timer)
+      )
+
+      reactionTimersRef.current.clear()
+
       const client =
         clientRef.current
 
@@ -2304,7 +2443,6 @@ export default function MeetingRoom({
     },
     [
       closePeer,
-      participantStorageKey,
       roomId,
     ]
   )
@@ -2320,6 +2458,12 @@ export default function MeetingRoom({
 
   useEffect(() => {
     return () => {
+      reactionTimersRef.current.forEach(
+        (timer) => clearTimeout(timer)
+      )
+
+      reactionTimersRef.current.clear()
+
       screenStreamRef.current
         ?.getTracks()
         .forEach((track) =>
@@ -2611,12 +2755,7 @@ export default function MeetingRoom({
           }
         )
 
-        if (
-          localVideoElementRef.current
-        ) {
-          localVideoElementRef.current.srcObject =
-            localStreamRef.current
-        }
+        bindLocalVideo()
 
         return
       }
@@ -2683,16 +2822,7 @@ export default function MeetingRoom({
           }
         )
 
-        if (
-          localVideoElementRef.current
-        ) {
-          localVideoElementRef.current.srcObject =
-            displayStream
-
-          void localVideoElementRef.current
-            .play()
-            .catch(() => {})
-        }
+        bindLocalVideo()
 
         screenTrack.onended =
           () => {
@@ -2765,18 +2895,14 @@ export default function MeetingRoom({
               }
             )
 
-            if (
-              localVideoElementRef.current
-            ) {
-              localVideoElementRef.current.srcObject =
-                localStreamRef.current
-            }
+            bindLocalVideo()
           }
       } catch {
         // User canceled or browser blocked screen sharing.
       }
     },
     [
+      bindLocalVideo,
       isScreenSharing,
       publish,
       roomId,
