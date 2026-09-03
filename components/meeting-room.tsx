@@ -129,6 +129,21 @@ type PeerState = {
   ignoreOffer: boolean
 }
 
+type TabSyncMessage = {
+  type: "CLAIM" | "STATE" | "COMMAND"
+  roomId: string
+  participantId: string
+  tabId: string
+  action?: "MIC" | "CAMERA" | "HAND" | "SCREEN_SHARE" | "REACTION"
+  value?: boolean
+  emoji?: string
+  micOn?: boolean
+  cameraOn?: boolean
+  handRaised?: boolean
+  screenSharing?: boolean
+  name?: string
+}
+
 type JoinPhase =
   | "idle"
   | "requesting_media"
@@ -244,8 +259,8 @@ export default function MeetingRoom({
   const [joinError, setJoinError] =
     useState<string | null>(null)
 
-  const [sessionReplaced, setSessionReplaced] =
-    useState(false)
+  const [isActiveTab, setIsActiveTab] =
+    useState(true)
 
   /* =======================================================
      REFS
@@ -269,13 +284,17 @@ export default function MeetingRoom({
   const participantIdRef =
     useRef<string>("")
 
-  /*
-   * Unique identity for this browser tab's active MyMeet session.
-   * The participantId remains stable across reconnects, while this
-   * value lets the backend/frontend distinguish a replaced tab.
-   */
-  const connectionIdRef =
+  const tabIdRef =
     useRef<string>("")
+
+  const activeTabIdRef =
+    useRef<string>("")
+
+  const tabChannelRef =
+    useRef<BroadcastChannel | null>(null)
+
+  const tabCommandHandlerRef =
+    useRef<((message: TabSyncMessage) => void) | null>(null)
 
   /*
    * Keep one logical participant identity for this room
@@ -324,156 +343,142 @@ export default function MeetingRoom({
       null
     )
 
-  /*
-   * Keep one reaction timer per participant.
-   * This prevents an older reaction timeout from
-   * clearing a newer reaction too early.
-   */
   const reactionTimersRef =
-    useRef<
-      Map<
-        string,
-        ReturnType<typeof setTimeout>
-      >
-    >(new Map())
+    useRef<Map<string, ReturnType<typeof setTimeout>>>(
+      new Map()
+    )
 
   /* =======================================================
      INITIALIZE PARTICIPANT
      ======================================================= */
 
+  useEffect(() => {
+    if (!tabIdRef.current) {
+      tabIdRef.current = crypto.randomUUID()
+      activeTabIdRef.current = tabIdRef.current
+    }
 
-  /* =========================================================
-   INITIALIZE PARTICIPANT
-   ========================================================= */
+    if (!participantIdRef.current) {
+      const storedParticipantId =
+        sessionStorage.getItem(
+          participantStorageKey
+        )
 
-    useEffect(() => {
-      /*
-       * React Strict Mode runs effects as:
-       * setup -> cleanup -> setup.
-       * Always restore the mounted flag at setup time.
-       */
-      mountedRef.current = true
+      participantIdRef.current =
+        storedParticipantId ||
+        crypto.randomUUID()
 
-      if (!connectionIdRef.current) {
-        connectionIdRef.current =
-          crypto.randomUUID()
-      }
+      sessionStorage.setItem(
+        participantStorageKey,
+        participantIdRef.current
+      )
+    }
 
-      if (!participantIdRef.current) {
-        const storedParticipantId =
-          localStorage.getItem(
-            participantStorageKey
-          )
+    const storedName =
+      sessionStorage.getItem("mymeet-name")
 
-        participantIdRef.current =
-          storedParticipantId ||
-          crypto.randomUUID()
+    if (storedName) {
+      nameRef.current = storedName
+      setName(storedName)
+    }
 
-        localStorage.setItem(
-          participantStorageKey,
-          participantIdRef.current
+    return () => {
+      mountedRef.current = false
+
+      if (slowNoticeTimerRef.current) {
+        clearTimeout(
+          slowNoticeTimerRef.current
         )
       }
+    }
+  }, [])
 
-      const storedName =
-        sessionStorage.getItem("mymeet-name")
+  const broadcastTabMessage = useCallback(
+    (message: Omit<TabSyncMessage, "roomId" | "participantId" | "tabId">) => {
+      const channel = tabChannelRef.current
+      if (!channel || !tabIdRef.current || !participantIdRef.current) return
+      try {
+        channel.postMessage({ ...message, roomId, participantId: participantIdRef.current, tabId: tabIdRef.current } satisfies TabSyncMessage)
+      } catch {
+        // Ignore local-tab synchronization failures.
+      }
+    },
+    [roomId]
+  )
 
-      if (storedName) {
-        nameRef.current = storedName
-        setName(storedName)
+  useEffect(() => {
+    if (typeof window === "undefined" || !tabIdRef.current || !("BroadcastChannel" in window)) return
+
+    const channel = new BroadcastChannel(`mymeet:participant:${roomId}:${participantIdRef.current}`)
+    tabChannelRef.current = channel
+
+    const handleMessage = (event: MessageEvent<TabSyncMessage>) => {
+      const message = event.data
+      if (!message || message.roomId !== roomId || message.participantId !== participantIdRef.current || message.tabId === tabIdRef.current) return
+
+      if (message.type === "CLAIM") {
+        activeTabIdRef.current = message.tabId
+        setIsActiveTab(false)
+        return
       }
 
-      return () => {
-        mountedRef.current = false
-
-        if (slowNoticeTimerRef.current) {
-          clearTimeout(
-            slowNoticeTimerRef.current
-          )
-        }
+      if (message.type === "STATE" && message.tabId === activeTabIdRef.current) {
+        if (message.micOn !== undefined) setMicOn(message.micOn)
+        if (message.cameraOn !== undefined) setCameraOn(message.cameraOn)
+        if (message.handRaised !== undefined) setHandRaised(message.handRaised)
+        if (message.screenSharing !== undefined) setIsScreenSharing(message.screenSharing)
+        setParticipants((current) => current.map((p) => p.id === participantIdRef.current ? { ...p, name: message.name?.trim() || p.name, muted: message.micOn !== undefined ? !message.micOn : p.muted, cameraOff: message.cameraOn !== undefined ? !message.cameraOn : p.cameraOff, handRaised: message.handRaised ?? p.handRaised, screenSharing: message.screenSharing ?? p.screenSharing } : p))
       }
-    }, [])
+    }
 
+    channel.addEventListener("message", handleMessage)
+    return () => {
+      channel.removeEventListener("message", handleMessage)
+      channel.close()
+      if (tabChannelRef.current === channel) tabChannelRef.current = null
+    }
+  }, [roomId])
+
+  useEffect(() => {
+    if (joinPhase !== "ready" || !isActiveTab) return
+
+    broadcastTabMessage({
+      type: "STATE",
+      micOn,
+      cameraOn,
+      handRaised,
+      screenSharing: isScreenSharing,
+      name: nameRef.current,
+    })
+  }, [
+    broadcastTabMessage,
+    cameraOn,
+    handRaised,
+    isActiveTab,
+    isScreenSharing,
+    joinPhase,
+    micOn,
+  ])
 
   /* =======================================================
      LOCAL VIDEO REF
      ======================================================= */
 
-  /*
-   * The local <video> element can be unmounted/remounted when
-   * pinning, opening chat, or changing the responsive layout.
-   * Always bind the current active stream after the element exists.
-   */
-  const bindLocalVideo = useCallback(() => {
-    const video =
-      localVideoElementRef.current
-
-    if (!video) {
-      return
-    }
-
-    const activeStream =
-      screenStreamRef.current ||
-      localStreamRef.current
-
-    if (!activeStream) {
-      video.srcObject = null
-      return
-    }
-
-    if (video.srcObject !== activeStream) {
-      video.srcObject = activeStream
-    }
-
-    video.muted = true
-    video.autoplay = true
-    video.playsInline = true
-
-    if (video.paused) {
-      void video.play().catch(() => {})
-    }
-  }, [])
-
   const setLocalVideoRef = useCallback(
     (element: HTMLVideoElement | null) => {
-      localVideoElementRef.current =
-        element
+      localVideoElementRef.current = element
 
-      if (element) {
-        bindLocalVideo()
+      const activeStream =
+        screenStreamRef.current ||
+        localStreamRef.current
+
+      if (element && activeStream) {
+        element.srcObject = activeStream
+        void element.play().catch(() => {})
       }
     },
-    [bindLocalVideo]
+    []
   )
-
-  /*
-   * Rebind after layout/remount changes.
-   * requestAnimationFrame waits until React has committed
-   * the new video element to the DOM.
-   */
-  useEffect(() => {
-    if (!joined) {
-      return
-    }
-
-    let frameId = 0
-
-    frameId =
-      requestAnimationFrame(() => {
-        bindLocalVideo()
-      })
-
-    return () => {
-      cancelAnimationFrame(frameId)
-    }
-  }, [
-    bindLocalVideo,
-    joined,
-    cameraOn,
-    isScreenSharing,
-    chatOpen,
-    pinnedParticipantId,
-  ])
 
   /* =======================================================
      PUBLISH
@@ -530,13 +535,6 @@ export default function MeetingRoom({
 
         localStreamRef.current = stream
 
-        /*
-         * If the video element is already mounted, immediately
-         * attach the newly acquired stream. The layout effect
-         * below will also rebind after React updates.
-         */
-        bindLocalVideo()
-
         const audioEnabled =
           stream
             .getAudioTracks()
@@ -588,7 +586,7 @@ export default function MeetingRoom({
 
         return null
       }
-    }, [bindLocalVideo])
+    }, [])
 
   /* =======================================================
      REMOTE STREAM
@@ -1134,23 +1132,6 @@ export default function MeetingRoom({
         participantId: string,
         emoji: string
       ) => {
-        if (!participantId || !emoji) {
-          return
-        }
-
-        /*
-         * Cancel only this participant's previous reaction timer.
-         * Other participants' reactions remain independent.
-         */
-        const existingTimer =
-          reactionTimersRef.current.get(
-            participantId
-          )
-
-        if (existingTimer) {
-          clearTimeout(existingTimer)
-        }
-
         setParticipants((current) =>
           current.map(
             (participant) =>
@@ -1164,30 +1145,21 @@ export default function MeetingRoom({
           )
         )
 
-        const timer =
-          setTimeout(() => {
-            setParticipants((current) =>
-              current.map(
-                (participant) =>
-                  participant.id ===
-                  participantId
-                    ? {
-                        ...participant,
-                        reaction: null,
-                      }
-                    : participant
-              )
-            )
+        const previousTimer = reactionTimersRef.current.get(participantId)
+        if (previousTimer) clearTimeout(previousTimer)
 
-            reactionTimersRef.current.delete(
-              participantId
+        const timer = setTimeout(() => {
+          setParticipants((current) =>
+            current.map((participant) =>
+              participant.id === participantId
+                ? { ...participant, reaction: null }
+                : participant
             )
-          }, 3500)
+          )
+          reactionTimersRef.current.delete(participantId)
+        }, 3500)
 
-        reactionTimersRef.current.set(
-          participantId,
-          timer
-        )
+        reactionTimersRef.current.set(participantId, timer)
       },
       []
     )
@@ -1210,105 +1182,6 @@ export default function MeetingRoom({
 
         const data =
           parsed.data || parsed
-
-        /* ===================================================
-           SESSION REPLACED
-           =================================================== */
-
-        if (
-          type ===
-          "PARTICIPANT_SESSION_REPLACED"
-        ) {
-          const replacedParticipantId =
-            data.participantId
-
-          const activeConnectionId =
-            data.connectionId
-
-          /*
-           * The new tab receives this event too. Only the tab whose
-           * connectionId differs from the active connection must shut
-           * itself down.
-           */
-          if (
-            replacedParticipantId ===
-              participantIdRef.current &&
-            activeConnectionId &&
-            activeConnectionId !==
-              connectionIdRef.current
-          ) {
-            setSessionReplaced(true)
-            setStatus("offline")
-            setJoinPhase("idle")
-            setJoined(false)
-
-            if (slowNoticeTimerRef.current) {
-              clearTimeout(
-                slowNoticeTimerRef.current
-              )
-              slowNoticeTimerRef.current = null
-            }
-
-            reactionTimersRef.current.forEach(
-              (timer) => clearTimeout(timer)
-            )
-            reactionTimersRef.current.clear()
-
-            subscriptionsRef.current.forEach(
-              (subscription) => {
-                try {
-                  subscription.unsubscribe()
-                } catch {
-                  // Ignore cleanup errors.
-                }
-              }
-            )
-            subscriptionsRef.current = []
-
-            peerConnectionsRef.current.forEach(
-              (_, id) => closePeer(id)
-            )
-            peerConnectionsRef.current.clear()
-            peerStatesRef.current.clear()
-            pendingIceCandidatesRef.current.clear()
-
-            remoteVideoRefs.current.forEach(
-              (video) => {
-                video.srcObject = null
-              }
-            )
-            remoteVideoRefs.current.clear()
-
-            screenStreamRef.current
-              ?.getTracks()
-              .forEach((track) => track.stop())
-            screenStreamRef.current = null
-
-            localStreamRef.current
-              ?.getTracks()
-              .forEach((track) => track.stop())
-            localStreamRef.current = null
-
-            if (localVideoElementRef.current) {
-              localVideoElementRef.current.srcObject = null
-            }
-
-            const replacedClient = clientRef.current
-            clientRef.current = null
-
-            if (replacedClient) {
-              void replacedClient.deactivate().catch(() => {})
-            }
-
-            joiningRef.current = false
-            leavingRef.current = false
-            establishedConnectionRef.current = false
-
-            return
-          }
-
-          return
-        }
 
         /* ===================================================
            ROOM STATE
@@ -2089,7 +1962,6 @@ export default function MeetingRoom({
 
       joiningRef.current = true
       leavingRef.current = false
-      setSessionReplaced(false)
 
       setJoinError(null)
       setSlowServerNotice(false)
@@ -2107,7 +1979,7 @@ export default function MeetingRoom({
       try {
         if (!participantIdRef.current) {
           const storedParticipantId =
-            localStorage.getItem(
+            sessionStorage.getItem(
               participantStorageKey
             )
 
@@ -2115,11 +1987,15 @@ export default function MeetingRoom({
             storedParticipantId ||
             crypto.randomUUID()
 
-          localStorage.setItem(
+          sessionStorage.setItem(
             participantStorageKey,
             participantIdRef.current
           )
         }
+
+        activeTabIdRef.current = tabIdRef.current
+        setIsActiveTab(true)
+        broadcastTabMessage({ type: "CLAIM" })
 
         const displayName =
           name.trim() || "Guest"
@@ -2245,43 +2121,16 @@ export default function MeetingRoom({
                 )
               }
 
-              /*
-               * Read the actual current track state here.
-               * Do not reuse initialMicOn/initialCameraOn because
-               * the user may have toggled media before a reconnect.
-               */
-              const currentMicOn =
-                localStreamRef.current
-                  ?.getAudioTracks()
-                  .some(
-                    (track) =>
-                      track.readyState ===
-                        "live" &&
-                      track.enabled
-                  ) ?? false
-
-              const currentCameraOn =
-                localStreamRef.current
-                  ?.getVideoTracks()
-                  .some(
-                    (track) =>
-                      track.readyState ===
-                        "live" &&
-                      track.enabled
-                  ) ?? false
-
               const joinPayload = {
                 roomId,
                 participantId:
                   participantIdRef.current,
-                connectionId:
-                  connectionIdRef.current,
                 name:
                   nameRef.current,
                 muted:
-                  !currentMicOn,
+                  !initialMicOn,
                 cameraOff:
-                  !currentCameraOn,
+                  !initialCameraOn,
               }
 
               client.publish({
@@ -2425,12 +2274,6 @@ export default function MeetingRoom({
         )
       }
 
-      reactionTimersRef.current.forEach(
-        (timer) => clearTimeout(timer)
-      )
-
-      reactionTimersRef.current.clear()
-
       const client =
         clientRef.current
 
@@ -2566,6 +2409,7 @@ export default function MeetingRoom({
     },
     [
       closePeer,
+      participantStorageKey,
       roomId,
     ]
   )
@@ -2581,12 +2425,6 @@ export default function MeetingRoom({
 
   useEffect(() => {
     return () => {
-      reactionTimersRef.current.forEach(
-        (timer) => clearTimeout(timer)
-      )
-
-      reactionTimersRef.current.clear()
-
       screenStreamRef.current
         ?.getTracks()
         .forEach((track) =>
@@ -2618,6 +2456,14 @@ export default function MeetingRoom({
           }
         }
       )
+
+      reactionTimersRef.current.forEach((timer) => clearTimeout(timer))
+      reactionTimersRef.current.clear()
+
+      if (tabChannelRef.current) {
+        try { tabChannelRef.current.close() } catch { /* Ignore. */ }
+        tabChannelRef.current = null
+      }
 
       if (clientRef.current) {
         clientRef.current
@@ -2662,10 +2508,6 @@ export default function MeetingRoom({
       ) => {
         event?.preventDefault()
 
-        if (sessionReplaced) {
-          return
-        }
-
         const text =
           draft.trim()
 
@@ -2693,7 +2535,6 @@ export default function MeetingRoom({
         draft,
         publish,
         roomId,
-        sessionReplaced,
       ]
     )
 
@@ -2703,14 +2544,15 @@ export default function MeetingRoom({
 
   const toggleMic =
     useCallback(() => {
-      if (sessionReplaced) {
+      const next = !micOn
+
+      if (!isActiveTab) {
+        broadcastTabMessage({ type: "COMMAND", action: "MIC", value: next })
         return
       }
 
       const stream =
         localStreamRef.current
-
-      const next = !micOn
 
       if (stream) {
         stream
@@ -2751,12 +2593,17 @@ export default function MeetingRoom({
             !cameraOn,
         }
       )
+
+      broadcastTabMessage({ type: "STATE", micOn: next, cameraOn, handRaised, screenSharing: isScreenSharing, name: nameRef.current })
     }, [
+      broadcastTabMessage,
       cameraOn,
+      handRaised,
+      isActiveTab,
+      isScreenSharing,
       micOn,
       publish,
       roomId,
-      sessionReplaced,
     ])
 
   /* =======================================================
@@ -2765,14 +2612,15 @@ export default function MeetingRoom({
 
   const toggleCamera =
     useCallback(() => {
-      if (sessionReplaced) {
+      const next = !cameraOn
+
+      if (!isActiveTab) {
+        broadcastTabMessage({ type: "COMMAND", action: "CAMERA", value: next })
         return
       }
 
       const stream =
         localStreamRef.current
-
-      const next = !cameraOn
 
       if (stream) {
         stream
@@ -2812,12 +2660,17 @@ export default function MeetingRoom({
           cameraOff: !next,
         }
       )
+
+      broadcastTabMessage({ type: "STATE", micOn, cameraOn: next, handRaised, screenSharing: isScreenSharing, name: nameRef.current })
     }, [
+      broadcastTabMessage,
       cameraOn,
+      handRaised,
+      isActiveTab,
+      isScreenSharing,
       micOn,
       publish,
       roomId,
-      sessionReplaced,
     ])
 
   /* =======================================================
@@ -2826,7 +2679,8 @@ export default function MeetingRoom({
 
   const toggleScreenShare =
     useCallback(async () => {
-      if (sessionReplaced) {
+      if (!isActiveTab) {
+        broadcastTabMessage({ type: "COMMAND", action: "SCREEN_SHARE", value: !isScreenSharing })
         return
       }
 
@@ -2897,7 +2751,14 @@ export default function MeetingRoom({
           }
         )
 
-        bindLocalVideo()
+        if (
+          localVideoElementRef.current
+        ) {
+          localVideoElementRef.current.srcObject =
+            localStreamRef.current
+        }
+
+        broadcastTabMessage({ type: "STATE", micOn, cameraOn, handRaised, screenSharing: false, name: nameRef.current })
 
         return
       }
@@ -2964,7 +2825,18 @@ export default function MeetingRoom({
           }
         )
 
-        bindLocalVideo()
+        if (
+          localVideoElementRef.current
+        ) {
+          localVideoElementRef.current.srcObject =
+            displayStream
+
+          void localVideoElementRef.current
+            .play()
+            .catch(() => {})
+        }
+
+        broadcastTabMessage({ type: "STATE", micOn, cameraOn, handRaised, screenSharing: true, name: nameRef.current })
 
         screenTrack.onended =
           () => {
@@ -3037,18 +2909,28 @@ export default function MeetingRoom({
               }
             )
 
-            bindLocalVideo()
+            if (
+              localVideoElementRef.current
+            ) {
+              localVideoElementRef.current.srcObject =
+                localStreamRef.current
+            }
+
+            broadcastTabMessage({ type: "STATE", micOn, cameraOn, handRaised, screenSharing: false, name: nameRef.current })
           }
       } catch {
         // User canceled or browser blocked screen sharing.
       }
     },
     [
-      bindLocalVideo,
+      broadcastTabMessage,
+      cameraOn,
+      handRaised,
+      isActiveTab,
       isScreenSharing,
+      micOn,
       publish,
       roomId,
-      sessionReplaced,
     ])
 
   /* =======================================================
@@ -3057,12 +2939,13 @@ export default function MeetingRoom({
 
   const toggleHandRaise =
     useCallback(() => {
-      if (sessionReplaced) {
-        return
-      }
-
       const nextState =
         !handRaised
+
+      if (!isActiveTab) {
+        broadcastTabMessage({ type: "COMMAND", action: "HAND", value: nextState })
+        return
+      }
 
       setHandRaised(
         nextState
@@ -3093,11 +2976,17 @@ export default function MeetingRoom({
             nextState,
         }
       )
+
+      broadcastTabMessage({ type: "STATE", micOn, cameraOn, handRaised: nextState, screenSharing: isScreenSharing, name: nameRef.current })
     }, [
+      broadcastTabMessage,
+      cameraOn,
       handRaised,
+      isActiveTab,
+      isScreenSharing,
+      micOn,
       publish,
       roomId,
-      sessionReplaced,
     ])
 
   /* =======================================================
@@ -3107,11 +2996,12 @@ export default function MeetingRoom({
   const sendReaction =
     useCallback(
       (emoji: string) => {
-        if (sessionReplaced) {
+        setShowReactions(false)
+
+        if (!isActiveTab) {
+          broadcastTabMessage({ type: "COMMAND", action: "REACTION", emoji })
           return
         }
-
-        setShowReactions(false)
 
         triggerReactionDisplay(
           participantIdRef.current,
@@ -3129,12 +3019,53 @@ export default function MeetingRoom({
         )
       },
       [
+        broadcastTabMessage,
+        isActiveTab,
         publish,
         roomId,
         triggerReactionDisplay,
-        sessionReplaced,
       ]
     )
+
+  useEffect(() => {
+    tabCommandHandlerRef.current = (message) => {
+      if (message.action === "MIC" && message.value !== undefined) {
+        const next = message.value
+        localStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = next })
+        setMicOn(next)
+        setParticipants((current) => current.map((p) => p.id === participantIdRef.current ? { ...p, muted: !next } : p))
+        publish("/app/meet/media-status", { roomId, participantId: participantIdRef.current, muted: !next, cameraOff: !cameraOn })
+        broadcastTabMessage({ type: "STATE", micOn: next, cameraOn, handRaised, screenSharing: isScreenSharing, name: nameRef.current })
+        return
+      }
+      if (message.action === "CAMERA" && message.value !== undefined) {
+        const next = message.value
+        localStreamRef.current?.getVideoTracks().forEach((track) => { track.enabled = next })
+        setCameraOn(next)
+        setParticipants((current) => current.map((p) => p.id === participantIdRef.current ? { ...p, cameraOff: !next } : p))
+        publish("/app/meet/media-status", { roomId, participantId: participantIdRef.current, muted: !micOn, cameraOff: !next })
+        broadcastTabMessage({ type: "STATE", micOn, cameraOn: next, handRaised, screenSharing: isScreenSharing, name: nameRef.current })
+        return
+      }
+      if (message.action === "HAND" && message.value !== undefined) {
+        const next = message.value
+        setHandRaised(next)
+        setParticipants((current) => current.map((p) => p.id === participantIdRef.current ? { ...p, handRaised: next } : p))
+        publish("/app/meet/hand-raise", { roomId, participantId: participantIdRef.current, handRaised: next })
+        broadcastTabMessage({ type: "STATE", micOn, cameraOn, handRaised: next, screenSharing: isScreenSharing, name: nameRef.current })
+        return
+      }
+      if (message.action === "SCREEN_SHARE" && message.value !== undefined && message.value !== isScreenSharing) {
+        void toggleScreenShare()
+        return
+      }
+      if (message.action === "REACTION" && message.emoji) {
+        triggerReactionDisplay(participantIdRef.current, message.emoji)
+      }
+    }
+
+    return () => { tabCommandHandlerRef.current = null }
+  }, [broadcastTabMessage, cameraOn, handRaised, isScreenSharing, micOn, publish, roomId, toggleScreenShare, triggerReactionDisplay])
 
   /* =======================================================
      REMOTE VIDEO REF
@@ -3428,25 +3359,6 @@ export default function MeetingRoom({
                   : "Please wait while we establish your secure WebRTC session."}
               </p>
             </div>
-          </div>
-        </div>
-      )}
-
-      {sessionReplaced && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#121615]/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#181d1b] p-6 text-center shadow-2xl">
-            <div className="mx-auto mb-4 grid size-12 place-items-center rounded-2xl bg-amber-500/15 text-amber-400">
-              <Video size={22} />
-            </div>
-            <h2 className="text-base font-semibold text-white">
-              Meeting opened in another tab
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-[#9aa59f]">
-              This tab is no longer the active meeting session. Your camera and microphone have been released.
-            </p>
-            <p className="mt-3 text-xs text-[#68736e]">
-              Use the other tab to continue the meeting.
-            </p>
           </div>
         </div>
       )}
@@ -3805,19 +3717,13 @@ export default function MeetingRoom({
                       .value
                   )
                 }
-                placeholder={
-                  sessionReplaced
-                    ? "Session replaced"
-                    : "Send a message..."
-                }
-                disabled={sessionReplaced}
+                placeholder="Send a message..."
                 className="flex-1 rounded-xl bg-white/5 px-3 py-2 text-xs text-white outline-none placeholder:text-[#606b66] focus:ring-1 focus:ring-[#e76f51]"
               />
 
               <button
                 type="submit"
                 disabled={
-                  sessionReplaced ||
                   !draft.trim()
                 }
                 className="grid size-8 shrink-0 place-items-center rounded-xl bg-[#e76f51] text-white transition-colors hover:bg-[#d05d41] disabled:opacity-40"
@@ -3841,7 +3747,6 @@ export default function MeetingRoom({
             onClick={
               toggleMic
             }
-            disabled={sessionReplaced}
             className={`grid size-10 sm:size-12 place-items-center rounded-xl transition-all ${
               micOn
                 ? "bg-white/10 text-white hover:bg-white/20"
@@ -3871,7 +3776,6 @@ export default function MeetingRoom({
             onClick={
               toggleCamera
             }
-            disabled={sessionReplaced}
             className={`grid size-10 sm:size-12 place-items-center rounded-xl transition-all ${
               cameraOn
                 ? "bg-white/10 text-white hover:bg-white/20"
@@ -3901,7 +3805,6 @@ export default function MeetingRoom({
             onClick={() =>
               void toggleScreenShare()
             }
-            disabled={sessionReplaced}
             className={`grid size-10 sm:size-12 place-items-center rounded-xl transition-all ${
               isScreenSharing
                 ? "border border-emerald-500/30 bg-emerald-500/20 text-emerald-400"
@@ -3931,7 +3834,6 @@ export default function MeetingRoom({
             onClick={
               toggleHandRaise
             }
-            disabled={sessionReplaced}
             className={`grid size-10 sm:size-12 place-items-center rounded-xl transition-all ${
               handRaised
                 ? "border border-amber-500/30 bg-amber-500/20 text-amber-400"
